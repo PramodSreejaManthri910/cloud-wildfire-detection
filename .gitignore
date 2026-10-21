@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment variables / credentials
+.env
+.env.*
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Training datasets
+data/
+
+# Generated model files
+models/*.keras
+models/*.h5
+
+# TensorFlow / training artifacts
+logs/
+checkpoints/
+*.ckpt
+
+# Jupyter
+.ipynb_checkpoints/
