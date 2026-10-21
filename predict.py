@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 
 import matplotlib.pyplot as plt
@@ -18,13 +19,46 @@ MODEL_PATH = os.path.join(
     "wildfire_model.keras",
 )
 
+CLASS_MAPPING_PATH = os.path.join(
+    "models",
+    "class_indices.json",
+)
+
 
 # --------------------------------------------------
-# Load and Preprocess Image
+# Load Class Mapping
+# --------------------------------------------------
+
+def load_class_mapping():
+    """Load the class mapping generated during training."""
+
+    if not os.path.exists(CLASS_MAPPING_PATH):
+        raise FileNotFoundError(
+            f"Class mapping not found at {CLASS_MAPPING_PATH}. "
+            "Run train_model.py first."
+        )
+
+    with open(
+        CLASS_MAPPING_PATH,
+        "r",
+        encoding="utf-8",
+    ) as file:
+        class_indices = json.load(file)
+
+    # Convert {"fire": 0, "nofire": 1}
+    # into {0: "fire", 1: "nofire"}
+    return {
+        int(index): class_name
+        for class_name, index in class_indices.items()
+    }
+
+
+# --------------------------------------------------
+# Image Preprocessing
 # --------------------------------------------------
 
 def preprocess_image(image_path):
-    """Load and preprocess an image for wildfire prediction."""
+    """Load and preprocess an image for prediction."""
 
     image = Image.open(image_path).convert("RGB")
     image = image.resize(IMG_SIZE)
@@ -36,7 +70,6 @@ def preprocess_image(image_path):
 
     image_array /= 255.0
 
-    # Add batch dimension
     image_array = np.expand_dims(
         image_array,
         axis=0,
@@ -46,30 +79,43 @@ def preprocess_image(image_path):
 
 
 # --------------------------------------------------
-# Predict
+# Prediction
 # --------------------------------------------------
 
-def predict_wildfire(model, image_array):
-    """Predict whether an image contains wildfire."""
+def predict_wildfire(
+    model,
+    image_array,
+    class_mapping,
+):
+    """Predict wildfire class using the saved class mapping."""
 
-    prediction = float(
+    score = float(
         model.predict(
             image_array,
             verbose=0,
         )[0][0]
     )
 
-    # The dataset/model convention used by this project
-    # treats values below 0.5 as Fire and values at or
-    # above 0.5 as No Fire.
-    if prediction < 0.5:
-        label = "Fire"
-        confidence = 1.0 - prediction
-    else:
-        label = "No Fire"
-        confidence = prediction
+    predicted_index = 1 if score >= 0.5 else 0
 
-    return label, prediction, confidence
+    predicted_class = class_mapping[
+        predicted_index
+    ]
+
+    confidence = (
+        score
+        if predicted_index == 1
+        else 1.0 - score
+    )
+
+    # Make class names presentation-friendly
+    predicted_class = (
+        predicted_class
+        .replace("_", " ")
+        .title()
+    )
+
+    return predicted_class, score, confidence
 
 
 # --------------------------------------------------
@@ -79,22 +125,27 @@ def predict_wildfire(model, image_array):
 def display_result(
     image,
     label,
-    prediction,
+    score,
     confidence,
 ):
-    """Display the image and prediction result."""
+    """Display wildfire classification results."""
 
     print("\nWildfire Detection Result")
     print("-" * 30)
     print(f"Predicted Class : {label}")
-    print(f"Model Score     : {prediction:.4f}")
-    print(f"Confidence      : {confidence * 100:.2f}%")
+    print(f"Model Score     : {score:.4f}")
+    print(
+        f"Confidence      : "
+        f"{confidence * 100:.2f}%"
+    )
 
     plt.figure(figsize=(6, 6))
+
     plt.imshow(image)
 
     plt.title(
-        f"{label} | Confidence: {confidence * 100:.2f}%"
+        f"{label} | "
+        f"Confidence: {confidence * 100:.2f}%"
     )
 
     plt.axis("off")
@@ -110,7 +161,8 @@ def main():
 
     parser = argparse.ArgumentParser(
         description=(
-            "Predict wildfire presence from an input image."
+            "Predict wildfire presence "
+            "from an input image."
         )
     )
 
@@ -138,21 +190,28 @@ def main():
         MODEL_PATH
     )
 
+    class_mapping = load_class_mapping()
+
+    print(
+        f"Class mapping: {class_mapping}"
+    )
+
     image, image_array = preprocess_image(
         args.image
     )
 
-    label, prediction, confidence = (
+    label, score, confidence = (
         predict_wildfire(
             model,
             image_array,
+            class_mapping,
         )
     )
 
     display_result(
         image,
         label,
-        prediction,
+        score,
         confidence,
     )
 
