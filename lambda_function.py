@@ -14,24 +14,54 @@ from PIL import Image
 
 IMG_SIZE = (150, 150)
 
+BASE_DIR = os.path.dirname(__file__)
+
 MODEL_PATH = os.path.join(
-    os.path.dirname(__file__),
+    BASE_DIR,
     "models",
     "wildfire_model.keras",
 )
 
+CLASS_MAPPING_PATH = os.path.join(
+    BASE_DIR,
+    "models",
+    "class_indices.json",
+)
+
 
 # --------------------------------------------------
-# Load Resources
+# Load Model and Class Mapping
 # --------------------------------------------------
 
-# Load once during Lambda container initialization
-# instead of reloading the model for every request.
 model = tf.keras.models.load_model(
     MODEL_PATH,
     compile=False,
 )
 
+
+def load_class_mapping():
+    """Load the class mapping generated during training."""
+
+    with open(
+        CLASS_MAPPING_PATH,
+        "r",
+        encoding="utf-8",
+    ) as file:
+        class_indices = json.load(file)
+
+    # Convert:
+    # {"fire": 0, "nofire": 1}
+    # to:
+    # {0: "fire", 1: "nofire"}
+    return {
+        int(index): class_name
+        for class_name, index in class_indices.items()
+    }
+
+
+class_mapping = load_class_mapping()
+
+# Initialize S3 client once per Lambda container
 s3 = boto3.client("s3")
 
 
@@ -40,7 +70,7 @@ s3 = boto3.client("s3")
 # --------------------------------------------------
 
 def preprocess_image(image_bytes):
-    """Convert S3 image bytes into model-ready input."""
+    """Convert an S3 image into model-ready input."""
 
     image = Image.open(
         io.BytesIO(image_bytes)
@@ -77,16 +107,31 @@ def predict_wildfire(image_array):
         )[0][0]
     )
 
-    # Preserve the class convention used by
-    # the original trained wildfire model.
-    if score < 0.5:
-        predicted_class = "Fire"
-        confidence = 1.0 - score
-    else:
-        predicted_class = "No Fire"
-        confidence = score
+    predicted_index = (
+        1 if score >= 0.5 else 0
+    )
 
-    return predicted_class, score, confidence
+    predicted_class = class_mapping[
+        predicted_index
+    ]
+
+    confidence = (
+        score
+        if predicted_index == 1
+        else 1.0 - score
+    )
+
+    predicted_class = (
+        predicted_class
+        .replace("_", " ")
+        .title()
+    )
+
+    return (
+        predicted_class,
+        score,
+        confidence,
+    )
 
 
 # --------------------------------------------------
@@ -98,6 +143,7 @@ def lambda_handler(event, context):
     Run wildfire detection on an image stored in S3.
 
     Expected event:
+
     {
         "image_bucket": "bucket-name",
         "image_key": "path/to/image.jpg"
@@ -113,13 +159,15 @@ def lambda_handler(event, context):
             "body": json.dumps(
                 {
                     "error": (
-                        "Please provide 'image_bucket' "
-                        "and 'image_key'."
+                        "Please provide "
+                        "'image_bucket' and "
+                        "'image_key'."
                     )
                 }
             ),
             "headers": {
-                "Content-Type": "application/json"
+                "Content-Type":
+                    "application/json"
             },
         }
 
@@ -127,49 +175,75 @@ def lambda_handler(event, context):
     key = event["image_key"]
 
     try:
-        # Retrieve satellite/image data from Amazon S3
+
+        # ------------------------------------------
+        # Retrieve Image from Amazon S3
+        # ------------------------------------------
+
         response = s3.get_object(
             Bucket=bucket,
             Key=key,
         )
 
-        image_bytes = response["Body"].read()
+        image_bytes = (
+            response["Body"].read()
+        )
 
-        # Preprocess image
+        # ------------------------------------------
+        # Preprocess Image
+        # ------------------------------------------
+
         image_array = preprocess_image(
             image_bytes
         )
 
-        # Run inference
-        predicted_class, score, confidence = (
-            predict_wildfire(image_array)
+        # ------------------------------------------
+        # Run CNN Inference
+        # ------------------------------------------
+
+        (
+            predicted_class,
+            score,
+            confidence,
+        ) = predict_wildfire(
+            image_array
         )
+
+        # ------------------------------------------
+        # Return Prediction
+        # ------------------------------------------
 
         return {
             "statusCode": 200,
             "body": json.dumps(
                 {
-                    "predicted_class": predicted_class,
-                    "prediction_score": round(
-                        score,
-                        6,
-                    ),
-                    "confidence": round(
-                        confidence,
-                        6,
-                    ),
-                    "image_bucket": bucket,
-                    "image_key": key,
+                    "predicted_class":
+                        predicted_class,
+
+                    "prediction_score":
+                        round(score, 6),
+
+                    "confidence":
+                        round(confidence, 6),
+
+                    "image_bucket":
+                        bucket,
+
+                    "image_key":
+                        key,
                 }
             ),
             "headers": {
-                "Content-Type": "application/json"
+                "Content-Type":
+                    "application/json"
             },
         }
 
     except Exception as error:
+
         print(
-            f"Wildfire inference failed: {error}"
+            f"Wildfire inference failed: "
+            f"{error}"
         )
 
         return {
@@ -177,12 +251,14 @@ def lambda_handler(event, context):
             "body": json.dumps(
                 {
                     "error": (
-                        "Unable to process image "
-                        "for wildfire detection."
+                        "Unable to process "
+                        "image for wildfire "
+                        "detection."
                     )
                 }
             ),
             "headers": {
-                "Content-Type": "application/json"
+                "Content-Type":
+                    "application/json"
             },
         }
