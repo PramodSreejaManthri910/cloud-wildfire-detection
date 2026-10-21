@@ -1,0 +1,5 @@
+tensorflow==2.16.1
+numpy>=1.26,<2.0
+Pillow>=10.0
+boto3>=1.34
+matplotlib>=3.8
