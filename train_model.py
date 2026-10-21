@@ -1,3 +1,4 @@
+import json
 import os
 import tensorflow as tf
 
@@ -67,6 +68,31 @@ validation_generator = train_datagen.flow_from_directory(
     class_mode="binary",
     subset="validation",
     shuffle=False,
+)
+
+# --------------------------------------------------
+# Save Class Mapping
+# --------------------------------------------------
+
+CLASS_MAPPING_PATH = os.path.join(
+    MODEL_DIR,
+    "class_indices.json",
+)
+
+with open(
+    CLASS_MAPPING_PATH,
+    "w",
+    encoding="utf-8",
+) as file:
+    json.dump(
+        train_generator.class_indices,
+        file,
+        indent=4,
+    )
+
+print(
+    f"Class mapping: "
+    f"{train_generator.class_indices}"
 )
 
 
